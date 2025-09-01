@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 82f0dcfa233876343b38c372f6af12c6, type: 3}
+  m_Name: L3
+  m_EditorClassIdentifier: 
+  levelName: Level 3
+  spawnDirections: 9
+  intervalBetweenWaves: 17
+  waves:
+  - {fileID: 11400000, guid: eb4db26e9c98ae44ba5d705088d6f817, type: 2}
+  - {fileID: 11400000, guid: 5c930b22980e3bc469aea939cc444367, type: 2}
+  - {fileID: 11400000, guid: 227275c95c657e348a1cd589fc47ed54, type: 2}
+  - {fileID: 11400000, guid: 236f3932afc49e84c8a1c02293975b2a, type: 2}
