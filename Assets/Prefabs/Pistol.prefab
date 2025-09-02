@@ -10738,7 +10738,7 @@ MonoBehaviour:
   m_ReticleToUpdate: {fileID: 0}
   m_ShotLayerMask:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 128
   m_MuzzleFlashEffect: {fileID: 6230629995354878496}
   m_BarrelPosition: {fileID: 2103031201572228078}
   m_BulletRay: {fileID: 8168130927146068533}
@@ -10755,7 +10755,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b951b360f11bde14e9494d1d0558018c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_WeaponAim: {fileID: 0}
+  m_WeaponAim: {fileID: 8133327993579768537}
   m_RotationSpeed: 10
 --- !u!1 &7356219043620244988
 GameObject:

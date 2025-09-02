@@ -560,9 +560,6 @@ PrefabInstance:
       addedObject: {fileID: 1640661704297344525}
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 75ed4b1feb2e1d5488287235cb9195ce, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 4700574257649436531}
-    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 75ed4b1feb2e1d5488287235cb9195ce, type: 3}
-      insertIndex: -1
       addedObject: {fileID: 7861991279694195463}
   m_SourcePrefab: {fileID: 100100000, guid: 75ed4b1feb2e1d5488287235cb9195ce, type: 3}
 --- !u!1 &3938339999105661330 stripped
@@ -580,7 +577,7 @@ NavMeshAgent:
   m_Enabled: 1
   m_AgentTypeID: 0
   m_Radius: 0.18
-  m_Speed: 3
+  m_Speed: 5
   m_Acceleration: 8
   avoidancePriority: 50
   m_AngularSpeed: 120
@@ -627,41 +624,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ab8425e29c58cdb4cb9f5fd9d4895371, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_MaxHealth: 10
+  m_MaxHealth: 30
   m_Health: 0
   m_DamageAbsorption: 0
+  m_BulletHitFxId: 0
   m_BulletHitPrefab: {fileID: 4387763613245862943, guid: b526e01498dca8646ba3aa7a37f6801a, type: 3}
   m_ShowHealthbar: 1
   m_HealthBarCanvasPrefab: {fileID: 5858903111136162792, guid: 4cff5ffa41aae9b4daef0afb4b772aa5, type: 3}
   bloodDecal: {fileID: 5966241701254300729}
   m_YOffset: 2
---- !u!54 &4700574257649436531
-Rigidbody:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3938339999105661330}
-  serializedVersion: 4
-  m_Mass: 1
-  m_Drag: 0
-  m_AngularDrag: 0.05
-  m_CenterOfMass: {x: 0, y: 0, z: 0}
-  m_InertiaTensor: {x: 1, y: 1, z: 1}
-  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ImplicitCom: 1
-  m_ImplicitTensor: 1
-  m_UseGravity: 1
-  m_IsKinematic: 0
-  m_Interpolate: 0
-  m_Constraints: 126
-  m_CollisionDetection: 0
 --- !u!114 &7861991279694195463
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -674,6 +645,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4a5d5800f81c431458f8240894fa6d5a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  player: {fileID: 0}
   hit: {fileID: 2352729676218090559}
   minDistToHit: 1
   hitTime: 4.6
@@ -683,9 +655,24 @@ MonoBehaviour:
   separation: {x: 0, y: 0, z: 0}
   alignment: {x: 0, y: 0, z: 0}
   mates: 0
+  flockRange: 2
+  biasFar: 0.7
+  biasNear: 0.2
+  inertiaW: 0.4565809
+  nearNoFlockMul: 1.15
+  attackInMul: 1
+  attackOutMul: 1.4
+  sepNearScaleMin: 0.16
+  lookAhead: 3
+  minStep: 1
+  sampleRad: 1
+  retarget: 0.5
+  stuckMax: 0.8
+  navSampleRadius: 2
   id: 0
-  type: 1
+  type: 0
   RagdollPrefab: {fileID: 6733518159250996739, guid: df92c7d0d01cd7a4088e611fbe0d3a80, type: 3}
+  ragdollLife: 5
 --- !u!4 &4461972050333393704 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 75ed4b1feb2e1d5488287235cb9195ce, type: 3}

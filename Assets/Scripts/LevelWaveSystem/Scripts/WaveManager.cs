@@ -484,7 +484,7 @@ namespace WaveSystem
             else
             {
                 LogDebug("All levels completed!");
-                GameManager.Instance.ShowVictoryScreen();
+                //GameManager.Instance.ShowVictoryScreen();
             }
         }
         

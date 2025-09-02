@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: L3
   m_EditorClassIdentifier: 
   levelName: Level 3
-  spawnDirections: 9
+  spawnDirections: -1
   intervalBetweenWaves: 17
   waves:
   - {fileID: 11400000, guid: eb4db26e9c98ae44ba5d705088d6f817, type: 2}

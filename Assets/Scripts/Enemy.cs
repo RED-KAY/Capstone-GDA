@@ -1,48 +1,62 @@
 using UnityEngine;
 using UnityEngine.AI;
 
-public enum StateId { Boid = 1, Sheen = 2, Chase = 3, Attack = 4, Death = 5 }
+public enum StateId { Chase = 3, Attack = 4, Death = 5 }
 
 [RequireComponent(typeof(NavMeshAgent))]
 public class Enemy : MonoBehaviour
 {
-    // components
     NavMeshAgent agent;
     Animator anim;
     Damageable hp;
     FIMSpace.FProceduralAnimation.LegsAnimator legs;
 
-    // target
+    [SerializeField] Transform player;
     Transform target;
     Collider targetCol;
 
-    // hit + attack timing
     [SerializeField] HitTrigger hit;
     [SerializeField, Range(0.1f, 4f)] float minDistToHit = 1f;
     [SerializeField] float hitTime = 4.6f;
-    [SerializeField] float hitArm = 0f;
+    [SerializeField] float hitArm  = 0f;
 
     float atkTimer;
     float navTimer;
     [SerializeField] float navStep = 0.5f;
 
-    // boid data (filled by manager)
     public Vector3 cohesion, separation, alignment;
     public int mates;
 
-    // meta
+    [SerializeField] float flockRange = 25f;
+    [SerializeField] float biasFar    = 1.5f;
+    [SerializeField] float biasNear   = 0.2f;
+    [SerializeField, Range(0f,1f)] float inertiaW = 0.85f;
+    Vector3 steer;
+
+    [SerializeField] float nearNoFlockMul = 1.15f;
+    [SerializeField] float attackInMul  = 1.00f;
+    [SerializeField] float attackOutMul = 1.40f;
+    [SerializeField] float sepNearScaleMin = 0.35f;
+
+    [SerializeField] float lookAhead = 3f;
+    [SerializeField] float minStep   = 1f;
+    [SerializeField] float sampleRad = 1f;
+    [SerializeField] float retarget  = 0.5f;
+    [SerializeField] float stuckMax  = 0.8f;
+    float stuck;
+
+    [SerializeField] float navSampleRadius = 2f;
+
     public int id;
-    public int m_Type;
+    public int type;
+    public int m_Type { get { return type; } }
 
-    // ragdoll
-    [SerializeField] ZombieRagdoll RagdollPrefab;
+    [Header("Ragdoll")]
+    [SerializeField] ZombieRagdoll RagdollPrefab;   // direct instantiate
+    [SerializeField] float ragdollLife = 5f;
 
-    // state
     IState cur;
     public StateId state { get; private set; }
-    public int StateIndex => (int)state; // manager uses this
-
-    // velocity (manager reads this)
     public Vector3 Velocity => agent ? agent.velocity : Vector3.zero;
 
     void Awake()
@@ -51,6 +65,7 @@ public class Enemy : MonoBehaviour
         anim  = GetComponent<Animator>();
         hp    = GetComponent<Damageable>();
         legs  = GetComponent<FIMSpace.FProceduralAnimation.LegsAnimator>();
+        if (agent) agent.autoRepath = true;
 
         if (hp)
         {
@@ -59,15 +74,22 @@ public class Enemy : MonoBehaviour
         }
     }
 
+    void OnEnable() { EnsureOnNavMesh(); }
+
     void Start()
     {
-        SetTarget(GameManager.Instance.SheenFacilityT);
-        Set(new BoidState(this), StateId.Boid);
+        if (!player)
+        {
+            var p = GameObject.FindGameObjectWithTag("Player");
+            if (p) player = p.transform;
+        }
+        SetTarget(player);
+        EnsureOnNavMesh();
+        Set(new ChaseState(this), StateId.Chase);
     }
 
     void Update() { cur?.Tick(); }
 
-    // ------------ state host ------------
     public interface IState { void Enter(); void Tick(); void Exit(); }
 
     void Set(IState next, StateId idNew)
@@ -79,22 +101,14 @@ public class Enemy : MonoBehaviour
         ZombiesManager.Instance.OnStateUpdate(this);
     }
 
-    // wrappers for external triggers
-    public void GoSheen()  { Set(new SheenState(this), StateId.Sheen); }
     public void Chase(Transform t) { SetTarget(t); Set(new ChaseState(this), StateId.Chase); }
-    public void Attack()   { Set(new AttackState(this), StateId.Attack); }
-    public void Die()      { Set(new DeathState(this),  StateId.Death); }
+    public void Attack()           { Set(new AttackState(this), StateId.Attack); }
+    public void Die()              { Set(new DeathState(this),  StateId.Death); }
 
-    // ------------ events ------------
-    void OnHit(Transform from) { if (state != StateId.Death) Chase(from); }
+    void OnHit(Transform from) { if (state != StateId.Death) Chase(player ? player : from); }
     void OnDie()               { Die(); }
 
-    // ------------ helpers ------------
-    void SetTarget(Transform t)
-    {
-        target = t;
-        targetCol = t ? t.GetComponent<Collider>() : null;
-    }
+    void SetTarget(Transform t) { target = t; targetCol = t ? t.GetComponent<Collider>() : null; }
 
     public Vector3 ClosestTarget()
     {
@@ -103,37 +117,10 @@ public class Enemy : MonoBehaviour
         return target.position;
     }
 
-    public bool Near(float dSqr)
-    {
-        var p = ClosestTarget() - transform.position;
-        return p.sqrMagnitude <= dSqr;
-    }
-
-    // called by manager during boid compute step (when in Boid)
-    public void UpdateBoid()
-    {
-        if (mates != 0) cohesion /= mates;
-
-        Vector3 toT = (target.position - agent.transform.position).normalized;
-
-        var m = ZombiesManager.Instance;
-        Vector3 dir =
-            (cohesion   * m.m_CohesionFactor +
-             separation * m.m_SeparationFactor +
-             alignment  * m.m_AlignmentFactor +
-             toT        * m.m_PlayerFollowFactor).normalized;
-
-        float dot = Vector3.Dot(toT, dir);
-        if (dot <= m.m_MaxDeviationFromTarget) dir += toT;
-
-        Vector3 dst = agent.transform.position + dir * 1f;
-        if (agent && agent.enabled) agent.SetDestination(dst);
-    }
-
     public void Walk(bool on)
     {
         if (anim) { anim.SetBool("Walking", on); anim.SetBool("Attack", false); }
-        if (agent) agent.isStopped = !on;
+        if (agent && agent.enabled && agent.isOnNavMesh) agent.isStopped = !on;
         if (!on && agent) agent.velocity = Vector3.zero;
     }
 
@@ -146,39 +133,96 @@ public class Enemy : MonoBehaviour
         else if (v == 3) hit.gameObject.SetActive(false);
     }
 
-    // ------------ states ------------
-    class BoidState : IState
+    bool EnsureOnNavMesh()
     {
-        Enemy e; float d2;
-        public BoidState(Enemy e){ this.e = e; d2 = e.minDistToHit * e.minDistToHit; }
-        public void Enter(){ e.Walk(true); }
-        public void Tick(){ if (e.Near(d2)) e.Attack(); }
-        public void Exit(){ }
+        if (!agent || !agent.enabled) return false;
+        if (agent.isOnNavMesh) return true;
+        if (NavMesh.SamplePosition(transform.position, out var hit, navSampleRadius, NavMesh.AllAreas))
+            return agent.Warp(hit.position);
+        return false;
     }
 
-    class SheenState : IState
+    public void UpdateBoid()
     {
-        Enemy e; float d2;
-        public SheenState(Enemy e){ this.e = e; d2 = e.minDistToHit * e.minDistToHit; }
-        public void Enter()
+        if (!agent || !agent.enabled || !target) return;
+        if (!agent.isOnNavMesh && !EnsureOnNavMesh()) return;
+
+        float dist = Vector3.Distance(agent.transform.position, target.position);
+
+        if (dist > flockRange)
         {
-            e.Walk(true);
-            e.SetTarget(GameManager.Instance.SheenFacilityT);
-            if (e.agent && e.agent.enabled) e.agent.SetDestination(GameManager.Instance.SheenFacilityT.position);
+            if ((target.position - agent.destination).sqrMagnitude > retarget * retarget)
+                agent.SetDestination(target.position);
+            return;
         }
-        public void Tick(){ if (e.Near(d2)) e.Attack(); }
-        public void Exit(){ }
+
+        float nearCut = minDistToHit * nearNoFlockMul;
+        if (dist <= nearCut)
+        {
+            if ((target.position - agent.destination).sqrMagnitude > retarget * retarget)
+                agent.SetDestination(target.position);
+            return;
+        }
+
+        if (mates != 0) cohesion /= mates;
+
+        Vector3 toT = (target.position - agent.transform.position).normalized;
+        var m = ZombiesManager.Instance;
+
+        float tNear = Mathf.Clamp01(dist / flockRange);
+        Vector3 sepScaled = separation * Mathf.Lerp(sepNearScaleMin, 1f, tNear);
+
+        Vector3 dir =
+            (cohesion   * m.m_CohesionFactor +
+             sepScaled  * m.m_SeparationFactor +
+             alignment  * m.m_AlignmentFactor +
+             toT        * m.m_PlayerFollowFactor).normalized;
+
+        float bias = Mathf.Lerp(biasFar, biasNear, tNear);
+        dir = (dir + toT * bias).normalized;
+
+        float dot = Vector3.Dot(toT, dir);
+        if (dot <= m.m_MaxDeviationFromTarget) dir = (dir + toT).normalized;
+
+        if (steer == Vector3.zero) steer = dir;
+        steer = Vector3.Slerp(steer, dir, 1f - Mathf.Clamp01(inertiaW));
+        if (steer.sqrMagnitude < 1e-4f) return;
+
+        float step = Mathf.Max(lookAhead, minStep, agent.radius + agent.stoppingDistance * 0.5f);
+        Vector3 dst = agent.transform.position + steer.normalized * step;
+
+        if (NavMesh.SamplePosition(dst, out var hitPos, sampleRad, NavMesh.AllAreas))
+            dst = hitPos.position;
+
+        if ((dst - agent.destination).sqrMagnitude > retarget * retarget)
+            agent.SetDestination(dst);
+
+        bool slow = agent.velocity.sqrMagnitude < 0.01f;
+        bool tinyGoal = agent.remainingDistance < 0.2f;
+        bool playerFar = dist > minDistToHit;
+
+        if (slow && tinyGoal && playerFar)
+        {
+            stuck += Time.deltaTime;
+            if (stuck > stuckMax)
+            {
+                agent.SetDestination(target.position);
+                stuck = 0f;
+            }
+        }
+        else stuck = 0f;
     }
 
     class ChaseState : IState
     {
-        Enemy e; float d2;
-        public ChaseState(Enemy e){ this.e = e; d2 = e.minDistToHit * e.minDistToHit; }
+        Enemy e; float enter2;
+        public ChaseState(Enemy e){ this.e = e; enter2 = e.minDistToHit * e.attackInMul; enter2 *= enter2; }
         public void Enter()
         {
             e.Walk(true);
             e.navTimer = 0f;
-            if (e.agent && e.agent.enabled && e.target) e.agent.SetDestination(e.target.position);
+            if (e.agent && e.agent.enabled && e.agent.isOnNavMesh && e.target)
+                e.agent.SetDestination(e.target.position);
         }
         public void Tick()
         {
@@ -186,17 +230,19 @@ public class Enemy : MonoBehaviour
             if (e.navTimer >= e.navStep)
             {
                 e.navTimer = 0f;
-                if (e.agent && e.agent.enabled && e.target) e.agent.SetDestination(e.target.position);
+                if (e.agent && e.agent.enabled && e.agent.isOnNavMesh && e.target)
+                    e.agent.SetDestination(e.target.position);
             }
-            if (e.Near(d2)) e.Attack();
+            Vector3 d = e.ClosestTarget() - e.transform.position;
+            if (d.sqrMagnitude <= enter2) e.Attack();
         }
         public void Exit(){ }
     }
 
     class AttackState : IState
     {
-        Enemy e; float d2; Damageable other;
-        public AttackState(Enemy e){ this.e = e; d2 = e.minDistToHit * e.minDistToHit; }
+        Enemy e; float exit2; Damageable other;
+        public AttackState(Enemy e){ this.e = e; float r = e.minDistToHit * e.attackOutMul; exit2 = r * r; }
         public void Enter()
         {
             e.Walk(false);
@@ -210,17 +256,18 @@ public class Enemy : MonoBehaviour
             e.atkTimer += Time.deltaTime;
 
             if (e.atkTimer >= e.hitArm && !e.hit.isActiveAndEnabled && !e.hit.HitApplied)
-                e.Hit(2); // enable hit
+                e.Hit(2);
 
             if (e.atkTimer >= e.hitTime)
             {
                 e.atkTimer = 0f;
-                e.Hit(1); // reset
-                e.Hit(3); // disable
+                e.Hit(1);
+                e.Hit(3);
             }
 
-            if (!e.Near(d2)) { e.Chase(e.target); return; }
-            if (other && other.Dead) { e.GoSheen(); return; }
+            Vector3 d = e.ClosestTarget() - e.transform.position;
+            if (d.sqrMagnitude > exit2) { e.Chase(e.player ? e.player : e.target); return; }
+            if (other && other.Dead)     { e.Chase(e.player ? e.player : e.target); return; }
         }
         public void Exit(){ if (e.anim) e.anim.SetBool("Attack", false); e.Hit(3); }
     }
@@ -232,20 +279,30 @@ public class Enemy : MonoBehaviour
         public void Enter()
         {
             if (e.legs) e.legs.enabled = false;
-            if (e.agent) { e.agent.isStopped = true; e.agent.velocity = Vector3.zero; }
+            if (e.agent && e.agent.enabled && e.agent.isOnNavMesh)
+            {
+                e.agent.isStopped = true;
+                e.agent.velocity  = Vector3.zero;
+            }
             if (e.anim) e.anim.enabled = false;
 
+            // Instantiate ragdoll (no pooling)
             if (e.RagdollPrefab)
             {
                 var r = GameObject.Instantiate(e.RagdollPrefab);
-                r.gameObject.SetActive(false);
                 r.transform.position = e.transform.position;
                 r.transform.rotation = e.transform.rotation;
-                e.gameObject.SetActive(false);
                 r.gameObject.SetActive(true);
                 r.AddForce(-e.transform.forward, 100f);
+
+                // auto-destroy to avoid scene buildup
+                var auto = r.gameObject.GetComponent<RagdollAutoDestroy>();
+                if (!auto) auto = r.gameObject.AddComponent<RagdollAutoDestroy>();
+                auto.life = e.ragdollLife;
             }
-            else e.gameObject.SetActive(false);
+
+            // destroy this enemy (no pooling)
+            GameObject.Destroy(e.gameObject);
         }
         public void Tick(){ }
         public void Exit(){ }

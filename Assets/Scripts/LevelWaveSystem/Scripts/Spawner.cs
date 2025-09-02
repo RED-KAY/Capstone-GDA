@@ -1,224 +1,155 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 using WaveSystem.Core;
 
 namespace WaveSystem.Spawning
 {
-    /// <summary>
-    /// Handles the actual spawning of entities at specified locations.
-    /// This class is entity-agnostic and can spawn any GameObject.
-    /// </summary>
     public class Spawner : MonoBehaviour
     {
-        [Header("Spawn Configuration")]
+        [Header("Spawn")]
         [SerializeField] private float spawnHeightOffset = 0.5f;
         [SerializeField] private float minDistanceBetweenSpawns = 1f;
         [SerializeField] private int maxSpawnAttempts = 10;
-        
+
+        [Header("NavMesh")]
+        [SerializeField] private bool snapToNavMesh = true;
+        [SerializeField] private float navSampleRadius = 2f;
+        [SerializeField] private int navAreaMask = NavMesh.AllAreas;
+
+        [Header("Parents Per Type")]
+        [SerializeField] private Transform[] m_ZombieTypesParents;
+
         [Header("Debug")]
         [SerializeField] private bool enableDebugLogs = false;
         [SerializeField] private bool showSpawnGizmos = true;
-        
-        // Track spawn positions for debugging
-        private List<Vector3> m_RecentSpawnPositions = new List<Vector3>();
-        private float m_GizmoDisplayDuration = 2f;
 
-        [SerializeField] private Transform[] m_ZombieTypesParents;
+        readonly List<Vector3> m_RecentSpawnPositions = new List<Vector3>();
+        float m_GizmoDisplayDuration = 2f;
 
-        #region Public Methods
-
-        /// <summary>
-        /// Spawns entities at random positions within the specified bounds
-        /// </summary>
-        /// <param name="entityPrefab">The prefab to spawn</param>
-        /// <param name="count">Number of entities to spawn</param>
-        /// <param name="spawnBounds">The bounds within which to spawn</param>
-        /// <returns>List of spawned GameObjects</returns>
-        public List<Enemy> SpawnEntities(Enemy entityPrefab, int count, Bounds spawnBounds, int type)
+        public List<Enemy> SpawnEntities(Enemy prefab, int count, Bounds spawnBounds, int type)
         {
-            var spawnedEntities = new List<Enemy>();
+            var outList = new List<Enemy>();
+            if (!prefab) { Debug.LogError("[Spawner] prefab null"); return outList; }
+            if (count <= 0) { Log("count <= 0"); return outList; }
 
-            if (entityPrefab == null)
+            var poses = GenerateSpawnPositions(count, spawnBounds);
+
+            foreach (var basePos in poses)
             {
-                Debug.LogError("[Spawner] Cannot spawn null prefab!");
-                return spawnedEntities;
+                Vector3 p = basePos;
+                if (snapToNavMesh && NavMesh.SamplePosition(p, out var hit, navSampleRadius, navAreaMask))
+                    p = hit.position;
+
+                p += Vector3.up * spawnHeightOffset;
+
+                var z = Instantiate(prefab, p, Quaternion.identity);
+                SetParentByType(z.transform, type);
+
+                // register in your manager
+                ZombiesManager.Instance.AddZombieToGroup(type, z);
+
+                outList.Add(z);
+                Log($"Spawned {prefab.name} type={type} at {p}");
             }
 
-            if (count <= 0)
-            {
-                Debug.LogWarning("[Spawner] Spawn count must be greater than 0!");
-                return spawnedEntities;
-            }
-
-            // Generate spawn positions
-            var spawnPositions = GenerateSpawnPositions(count, spawnBounds);
-
-            // Spawn entities at generated positions
-            foreach (var position in spawnPositions)
-            {
-                Enemy spawnedEntity = Instantiate(entityPrefab, position, Quaternion.identity);
-                spawnedEntity.transform.SetParent(m_ZombieTypesParents[type]); // Set parent based on type
-                spawnedEntity.transform.position += Vector3.up * spawnHeightOffset; // Apply height offset
-                spawnedEntities.Add(spawnedEntity);
-                ZombiesManager.Instance.AddZombieToGroup(entityPrefab.m_Type, spawnedEntity);
-
-                LogDebug($"Spawned {entityPrefab.name} at {position}");
-            }
-
-            // Track positions for debug visualization
-            if (showSpawnGizmos)
-            {
-                m_RecentSpawnPositions.Clear();
-                m_RecentSpawnPositions.AddRange(spawnPositions);
-                Invoke(nameof(ClearRecentSpawnPositions), m_GizmoDisplayDuration);
-            }
-
-            return spawnedEntities;
+            TrackGizmos(poses);
+            return outList;
         }
-        
-        /// <summary>
-        /// Spawns entities at random positions within specified box collider
-        /// </summary>
-        /// <param name="entityPrefab">The prefab to spawn</param>
-        /// <param name="count">Number of entities to spawn</param>
-        /// <param name="spawnArea">Box collider defining the spawn area</param>
-        /// <returns>List of spawned GameObjects</returns>
-        public List<Enemy> SpawnEntities(Enemy entityPrefab, int count, BoxCollider spawnArea, int type)
+
+        public List<Enemy> SpawnEntities(Enemy prefab, int count, BoxCollider spawnArea, int type)
         {
-            if (spawnArea == null)
+            if (!spawnArea)
             {
-                Debug.LogError("[Spawner] Spawn area BoxCollider is null!");
+                Debug.LogError("[Spawner] BoxCollider null");
                 return new List<Enemy>();
             }
-            
-            // Convert BoxCollider to bounds in world space
+
             Bounds worldBounds = new Bounds(
                 spawnArea.transform.TransformPoint(spawnArea.center),
                 Vector3.Scale(spawnArea.size, spawnArea.transform.lossyScale)
             );
-            
-            return SpawnEntities(entityPrefab, count, worldBounds, type);
+
+            return SpawnEntities(prefab, count, worldBounds, type);
         }
-        
-        /// <summary>
-        /// Spawns a single entity at a specific position
-        /// </summary>
-        /// <param name="entityPrefab">The prefab to spawn</param>
-        /// <param name="position">World position to spawn at</param>
-        /// <param name="rotation">Rotation of the spawned entity</param>
-        /// <returns>The spawned GameObject</returns>
-        public Enemy SpawnEntity(Enemy entityPrefab, Vector3 position, Quaternion rotation)
+
+        public Enemy SpawnEntity(Enemy prefab, Vector3 position, Quaternion rotation)
         {
-            if (entityPrefab == null)
-            {
-                Debug.LogError("[Spawner] Cannot spawn null prefab!");
-                return null;
-            }
-            
-            Enemy spawnedEntity = Instantiate(entityPrefab, position, rotation);
-            spawnedEntity.transform.SetParent(m_ZombieTypesParents[entityPrefab.m_Type]); 
-            ZombiesManager.Instance.AddZombieToGroup(entityPrefab.m_Type, spawnedEntity);
-            
-            LogDebug($"Spawned {entityPrefab.name} at {position}");
-            
-            return spawnedEntity;
+            if (!prefab) { Debug.LogError("[Spawner] prefab null"); return null; }
+
+            Vector3 p = position;
+            if (snapToNavMesh && NavMesh.SamplePosition(p, out var hit, navSampleRadius, navAreaMask))
+                p = hit.position;
+
+            p += Vector3.up * spawnHeightOffset;
+
+            var z = Instantiate(prefab, p, rotation);
+            SetParentByType(z.transform, prefab.m_Type);
+            ZombiesManager.Instance.AddZombieToGroup(prefab.m_Type, z);
+            Log($"Spawned {prefab.name} type={prefab.m_Type} at {p}");
+            return z;
         }
-        
-        #endregion
-        
-        #region Private Methods
-        
-        /// <summary>
-        /// Generates random spawn positions within bounds
-        /// </summary>
-        private List<Vector3> GenerateSpawnPositions(int count, Bounds bounds)
+
+        // --- helpers ---
+        void SetParentByType(Transform t, int type)
         {
-            var positions = new List<Vector3>();
-            var usedPositions = new HashSet<Vector3>();
-            
+            if (m_ZombieTypesParents == null || type < 0 || type >= m_ZombieTypesParents.Length) return;
+            var parent = m_ZombieTypesParents[type];
+            if (parent) t.SetParent(parent, true);
+        }
+
+        List<Vector3> GenerateSpawnPositions(int count, Bounds bounds)
+        {
+            var list = new List<Vector3>(count);
+            var used = new List<Vector3>(count);
+
             for (int i = 0; i < count; i++)
             {
-                Vector3 position = Vector3.zero;
-                bool validPositionFound = false;
-                
-                // Try to find a valid position
-                for (int attempt = 0; attempt < maxSpawnAttempts; attempt++)
+                Vector3 pos = Vector3.zero;
+                bool ok = false;
+
+                for (int a = 0; a < maxSpawnAttempts; a++)
                 {
-                    // Generate random position within bounds
-                    position = new Vector3(
+                    pos = new Vector3(
                         Random.Range(bounds.min.x, bounds.max.x),
                         0f,
                         Random.Range(bounds.min.z, bounds.max.z)
                     );
-                    
-                    // Check if position is far enough from other spawn points
-                    if (IsPositionValid(position, usedPositions))
-                    {
-                        validPositionFound = true;
-                        break;
-                    }
+
+                    if (IsValid(pos, used)) { ok = true; break; }
                 }
-                
-                if (validPositionFound)
-                {
-                    positions.Add(position);
-                    usedPositions.Add(position);
-                }
-                else
-                {
-                    // Fallback: use the last generated position even if too close
-                    positions.Add(position);
-                    LogDebug($"Warning: Could not find valid spawn position after {maxSpawnAttempts} attempts");
-                }
+
+                list.Add(pos);
+                if (!ok) Log($"fallback pos used after {maxSpawnAttempts} tries");
+                used.Add(pos);
             }
-            
-            return positions;
+            return list;
         }
-        
-        /// <summary>
-        /// Checks if a position is valid (far enough from other positions)
-        /// </summary>
-        private bool IsPositionValid(Vector3 position, HashSet<Vector3> usedPositions)
+
+        bool IsValid(Vector3 p, List<Vector3> used)
         {
-            foreach (var usedPos in usedPositions)
-            {
-                if (Vector3.Distance(position, usedPos) < minDistanceBetweenSpawns)
-                {
-                    return false;
-                }
-            }
+            for (int i = 0; i < used.Count; i++)
+                if (Vector3.Distance(p, used[i]) < minDistanceBetweenSpawns) return false;
             return true;
         }
-        
-        /// <summary>
-        /// Clears recent spawn positions (for debug visualization)
-        /// </summary>
-        private void ClearRecentSpawnPositions()
-        {
-            m_RecentSpawnPositions.Clear();
-        }
-        
-        /// <summary>
-        /// Logs debug messages if enabled
-        /// </summary>
-        private void LogDebug(string message)
-        {
-            if (enableDebugLogs)
-            {
-                Debug.Log($"[Spawner] {message}");
-            }
-        }
-        
-        #endregion
-        
-        #region Debug Visualization
-        
-#if UNITY_EDITOR
-        private void OnDrawGizmos()
+
+        void TrackGizmos(List<Vector3> positions)
         {
             if (!showSpawnGizmos) return;
-            
-            // Draw recent spawn positions
+            m_RecentSpawnPositions.Clear();
+            m_RecentSpawnPositions.AddRange(positions);
+            CancelInvoke(nameof(ClearRecentSpawnPositions));
+            Invoke(nameof(ClearRecentSpawnPositions), m_GizmoDisplayDuration);
+        }
+
+        void ClearRecentSpawnPositions() => m_RecentSpawnPositions.Clear();
+
+        void Log(string m) { if (enableDebugLogs) Debug.Log($"[Spawner] {m}"); }
+
+#if UNITY_EDITOR
+        void OnDrawGizmos()
+        {
+            if (!showSpawnGizmos) return;
             Gizmos.color = Color.cyan;
             foreach (var pos in m_RecentSpawnPositions)
             {
@@ -227,7 +158,5 @@ namespace WaveSystem.Spawning
             }
         }
 #endif
-        
-        #endregion
     }
 }

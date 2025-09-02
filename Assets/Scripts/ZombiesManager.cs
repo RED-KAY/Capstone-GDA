@@ -22,47 +22,44 @@ public class ZombieMaterialStates { public Material[] m_States; }
 public class ZombiesManager : Singleton<ZombiesManager>
 {
     const int threadGroupSize = 1024;
-    const int MaxTypes  = 3;
-    const int MaxBatch  = 1023;
+    const int MaxTypes = 3;
+    const int MaxBatch = 1023;
 
     [SerializeField] ComputeShader m_BoidsComputeShader;
-
-    Transform[] m_ZombieTypes;
-    List<Enemy> m_All = new List<Enemy>();
-    readonly List<Enemy> m_Boids = new List<Enemy>();
 
     [SerializeField] Mesh[] m_ZombieMeshes;
     public ZombieMaterialStates[] m_ZombieMaterials;
 
-    // boids + ai params
-    [Range(0f, 3f), SerializeField] float m_State1UpdateDelay = 0.25f;
-    [Range(0, 1)] public float m_CohesionFactor;
-    [Range(0, 1)] public float m_SeparationFactor;
-    [Range(0, 1)] public float m_AlignmentFactor;
-    [Range(0, 1)] public float m_PlayerFollowFactor;
-    [Range(0, 0.9f)] public float m_MaxDeviationFromTarget;
-    [SerializeField] float m_MaxDistanceToSwitchState = 15f;
-    [SerializeField, Range(0.1f, 4f)] float m_MinDistanceToAttack = 1f;
-    public float m_RadiusOfInfluence;
-    public float m_AvoidRadius;
+    Transform[] m_ZombieTypes;
+    List<Enemy> m_All = new List<Enemy>();
+    readonly List<Enemy> m_Boids = new List<Enemy>(); // chasers
+
+    // boid tuning
+    [Range(0f, 0.5f), SerializeField] float m_BoidStep = 0.25f;
+    public float m_CohesionFactor;
+    public float m_SeparationFactor;
+    public float m_AlignmentFactor;
+    public float m_PlayerFollowFactor = 1f;
+    [Range(0, 0.9f)] public float m_MaxDeviationFromTarget = 0.2f;
+    public float m_RadiusOfInfluence = 6f;
+    public float m_AvoidRadius = 1.5f;
 
     float m_Timer;
 
+    // draw
     readonly List<Enemy>[] m_Draw = new List<Enemy>[MaxTypes];
     readonly MaterialPropertyBlock[] m_Mpbs = new MaterialPropertyBlock[MaxTypes];
-
     static readonly Matrix4x4[] s_Mats = new Matrix4x4[MaxBatch];
     static readonly List<float> s_Anim = new List<float>(MaxBatch);
+    bool m_DrawDirty;
 
+    // compute scratch
     bool m_InBoid;
     readonly List<Enemy> m_Add = new();
     readonly List<Enemy> m_Rem = new();
-    readonly List<Enemy> m_ToSheen = new();
 
     BoidData[] m_Scratch;
     ComputeBuffer m_Buffer;
-
-    bool m_DrawDirty;
 
     void Awake()
     {
@@ -79,8 +76,9 @@ public class ZombiesManager : Singleton<ZombiesManager>
 
     void Update()
     {
+        // flock step for all chasers
         m_Timer += Time.deltaTime;
-        if (m_Timer < m_State1UpdateDelay) return;
+        if (m_Timer < m_BoidStep) return;
         m_Timer = 0f;
 
         int n = m_Boids.Count;
@@ -113,33 +111,19 @@ public class ZombiesManager : Singleton<ZombiesManager>
         m_BoidsComputeShader.Dispatch(k, groups, 1, 1);
         m_Buffer.GetData(m_Scratch, 0, 0, n);
 
-        m_ToSheen.Clear();
-        float d2Switch = m_MaxDistanceToSwitchState * m_MaxDistanceToSwitchState;
-
         for (int i = 0; i < n; i++)
         {
             var e = m_Boids[i];
-
-            e.cohesion = m_Scratch[i].cohesion;
+            e.cohesion   = m_Scratch[i].cohesion;
             e.separation = m_Scratch[i].separation;
-            e.alignment = m_Scratch[i].alignment;
-            e.mates = m_Scratch[i].numberOfHordemates;
-
-            // apply boid steering
-            e.UpdateBoid();
-
-            // near sheen? switch
-            var sheenPos = GameManager.Instance.SheenFacilityPosition;
-            if ((sheenPos - e.transform.position).sqrMagnitude <= d2Switch)
-                m_ToSheen.Add(e);
+            e.alignment  = m_Scratch[i].alignment;
+            e.mates      = m_Scratch[i].numberOfHordemates;
+            e.UpdateBoid(); // steer with flock variance (now distance-aware)
         }
-
-        // move those to sheen
-        for (int i = 0; i < m_ToSheen.Count; i++) m_ToSheen[i].GoSheen();
 
         m_InBoid = false;
 
-        // flush deferred changes
+        // apply deferred membership
         if (m_Rem.Count > 0)
         {
             for (int i = 0; i < m_Rem.Count; i++) m_Boids.Remove(m_Rem[i]);
@@ -164,7 +148,6 @@ public class ZombiesManager : Singleton<ZombiesManager>
         DrawAll();
     }
 
-    // called when new zombie is spawned/assigned
     public void AddZombieToGroup(int typeIndex, Enemy z)
     {
         if (typeIndex < 0 || typeIndex >= m_ZombieTypes.Length)
@@ -183,26 +166,28 @@ public class ZombiesManager : Singleton<ZombiesManager>
         int newId = m_All.Count + 1;
         z.name += "_" + newId;
         z.id = newId;
-        z.m_Type = typeIndex;
+        z.type = typeIndex;
 
         m_All.Add(z);
-        m_Boids.Add(z); // starts as boid
-
+        m_Boids.Add(z); // starts in Chase
         m_DrawDirty = true;
     }
 
-    // enemy tells us on every state change
+    // Enemy calls this when state changes
     public void OnStateUpdate(Enemy e)
     {
         if (m_InBoid)
         {
-            if (e.state != StateId.Boid) m_Rem.Add(e);
-            else m_Add.Add(e);
+            if (e.state == StateId.Chase) m_Add.Add(e);
+            else m_Rem.Add(e);
         }
         else
         {
-            if (e.state != StateId.Boid) m_Boids.Remove(e);
-            else if (!m_Boids.Contains(e)) m_Boids.Add(e);
+            if (e.state == StateId.Chase)
+            {
+                if (!m_Boids.Contains(e)) m_Boids.Add(e);
+            }
+            else m_Boids.Remove(e);
         }
 
         if (e.state == StateId.Death) m_All.Remove(e);
@@ -219,8 +204,18 @@ public class ZombiesManager : Singleton<ZombiesManager>
             var z = m_All[i];
             if (!z) continue;
             if (z.state == StateId.Death) continue;
-            if (z.m_Type < 0 || z.m_Type >= MaxTypes) continue;
-            m_Draw[z.m_Type].Add(z);
+            if (z.type < 0 || z.type >= MaxTypes) continue;
+            m_Draw[z.type].Add(z);
+        }
+    }
+
+    static int Slice(StateId s)
+    {
+        switch (s)
+        {
+            case StateId.Attack: return 1;
+            case StateId.Death:  return 2;
+            default:             return 0; // chase locomotion
         }
     }
 
@@ -244,16 +239,6 @@ public class ZombiesManager : Singleton<ZombiesManager>
         }
     }
 
-    static int Slice(StateId s)
-    {
-        switch (s)
-        {
-            case StateId.Attack: return 1;
-            case StateId.Death:  return 2;
-            default:             return 0; // boid/sheen/chase
-        }
-    }
-
     void DrawGroup(int typeIndex, Mesh mesh, Material mat, List<Enemy> group)
     {
         int total = group.Count;
@@ -274,8 +259,8 @@ public class ZombiesManager : Singleton<ZombiesManager>
                 }
 
                 float scale = 1f;
-                if (z.m_Type == 1) scale = 1.3f;
-                else if (z.m_Type == 2) scale = 2f;
+                if (z.type == 1) scale = 1.3f;
+                else if (z.type == 2) scale = 2f;
 
                 s_Mats[i] = Matrix4x4.TRS(z.transform.position, z.transform.rotation, Vector3.one * scale);
 

@@ -8,15 +8,15 @@ public class ZombieRagdoll : MonoBehaviour
     public void AddForce(Vector3 direction, float force)
     {
         m_HipRb.AddForce(direction * force);
-        StartCoroutine(Hide());
+        //StartCoroutine(Hide());
     }
 
     IEnumerator Hide()
     {
-        yield return new WaitForSeconds(5f);
+        yield return new WaitForSeconds(15f);
 
 
         //TODO: Object pooling : [Id: ZombieRagdoll] Return Back.
-        gameObject.SetActive(false);
+        PoolRecycle.Recycle(gameObject);
     }
 }

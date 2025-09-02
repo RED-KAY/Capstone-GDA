@@ -15,7 +15,7 @@ MonoBehaviour:
   waveName: Level 1 Wave 1
   sequentialGroupSpawning: 1
   spawnGroups:
-  - entityPrefab: {fileID: -7303761381431984890, guid: c828a31c8ce29584d980b0a6fa9743b0, type: 3}
-    maxAmount: 20
+  - entityPrefab: {fileID: 7861991279694195463, guid: c828a31c8ce29584d980b0a6fa9743b0, type: 3}
+    maxAmount: 40
     entitiesPerSpawn: 5
     spawnInterval: 2
